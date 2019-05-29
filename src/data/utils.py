@@ -84,9 +84,12 @@ def compute_band_powers(eegdata, fs):
     # Beta 12-30
     ind_beta, = np.where((f >= 12) & (f < 30))
     meanBeta = np.mean(PSD[ind_beta, :], axis=0)
+    # All
+    ind_all, = np.where((f < 30))
+    meanAll = np.mean(PSD[ind_all, :], axis=0)
 
     feature_vector = np.concatenate((meanDelta, meanTheta, meanAlpha,
-                                     meanBeta), axis=0)
+                                     meanBeta, meanAll), axis=0)
 
     feature_vector = np.log10(feature_vector)
 

@@ -4,14 +4,14 @@ from pylsl import StreamInlet, resolve_byprop  # Module to receive EEG data
 import utils  # Our own utility functions
 import matplotlib.axes as axes
 import time
+
 # Handy little enum to make code more readable
-
-
 class Band:
     Delta = 0
     Theta = 1
     Alpha = 2
     Beta = 3
+    All = 4
 
 
 """ EXPERIMENTAL PARAMETERS """
@@ -19,13 +19,13 @@ class Band:
 
 # Length of the EEG data buffer (in seconds)
 # This buffer will hold last n seconds of data and be used for calculations
-BUFFER_LENGTH = 5
+BUFFER_LENGTH = 8
 
 # Length of the epochs used to compute the FFT (in seconds)
-EPOCH_LENGTH = 1
+EPOCH_LENGTH = 5
 
 # Amount of overlap between two consecutive epochs (in seconds)
-OVERLAP_LENGTH = 0.985
+OVERLAP_LENGTH = 4.99
 
 # Amount to 'shift' the start of each next consecutive epoch
 SHIFT_LENGTH = EPOCH_LENGTH - OVERLAP_LENGTH
@@ -70,9 +70,9 @@ if __name__ == "__main__":
                               SHIFT_LENGTH + 1))
 
     # Initialize the band power buffer (for plotting)
-    # bands will be ordered: [delta, theta, alpha, beta]
-    band_buffer = np.zeros((n_win_test, 4))
-    power_buffer=np.zeros((n_win_test, 1))
+    # bands will be ordered: [delta, theta, alpha, beta, all]
+    band_buffer = np.zeros((n_win_test, 5))
+    #power_buffer=np.zeros((n_win_test, 1))
 
     # Initilize Plots
     
@@ -114,10 +114,10 @@ if __name__ == "__main__":
             # Compute band powers
             band_powers = utils.compute_band_powers(data_epoch, fs)
             band_buffer, _ = utils.update_buffer(band_buffer,
-                                                 np.asarray([band_powers]))
+                                                np.asarray([band_powers]))
             # Compute the average band powers for all epochs in buffer
             # This helps to smooth out noise
-            smooth_band_powers = np.mean(band_buffer, axis=0)
+            #smooth_band_powers = np.mean(band_buffer, axis=0)
 
             # print('Delta: ', band_powers[Band.Delta], ' Theta: ', band_powers[Band.Theta],
             #       ' Alpha: ', band_powers[Band.Alpha], ' Beta: ', band_powers[Band.Beta])
@@ -134,17 +134,18 @@ if __name__ == "__main__":
             ## PSD for uV timeseries
 
             winSampleLength, nbCh = data_epoch.shape
-            w = np.hamming(winSampleLength)
-            dataWinCentered = data_epoch - np.mean(data_epoch, axis=0)  # Remove offset
-            dataWinCenteredHam = (dataWinCentered.T * w).T
+            #w = np.hamming(winSampleLength)
+            #dataWinCentered = data_epoch - np.mean(data_epoch, axis=0)  # Remove offset
+            #dataWinCenteredHam = (dataWinCentered.T * w).T
 
             NFFT = utils.nextpow2(winSampleLength)
-            Y = np.fft.fft(dataWinCenteredHam, n=NFFT, axis=0) / winSampleLength
-            PSD = 2 * np.abs(Y[0:int(NFFT / 2), :])
-            meanAll=np.mean(PSD,axis=0)
-            power_buffer, _ = utils.update_buffer(power_buffer,
-                                                 np.asarray([meanAll]))
+            #Y = np.fft.fft(dataWinCenteredHam, n=NFFT, axis=0) / winSampleLength
+            #PSD = 2 * np.abs(Y[0:int(NFFT / 2), :])
+            #meanAll=np.mean(PSD,axis=0)
+            #power_buffer, _ = utils.update_buffer(power_buffer,
+                                                 #np.asarray([meanAll]))
             f = fs / 2 * np.linspace(0, 1, int(NFFT / 2))
+            #print(power_buffer)
 
             ## PSD for power timeseries
             winSampleLength2, nbCh2=band_buffer.shape
@@ -181,25 +182,25 @@ if __name__ == "__main__":
             axs[0].set_ylabel('Amplitude')
 
             
-            axs[0].set_ylim(0,.03)
-            axs[0].set_xlim(0,100)
+            #axs[0].set_ylim(0,.03)
+            axs[0].set_xlim(0,35)
             
 
             ## One big bandwidth plot
-            line5,=axs[1].plot(np.squeeze(f2),np.squeeze(np.sum(PSD2,axis=1)),'o')
-            axs[1].set_ylim(0,.15)
+            line5,=axs[1].plot(np.squeeze(f2),np.squeeze(PSD2[:,4]),'o')
+            #axs[1].set_ylim(0,.15)
             axs[1].set_xlabel('Frequency')
             axs[1].set_ylabel('Amplitude')
             axs[1].set_title('Power PSD')
             
 
-            ## Raw voltage expansion
-            line6,=axs[2].plot(np.squeeze(f),np.squeeze(PSD))
-            axs[2].set_ylim(0,15)
-            axs[2].set_xlim(0,35)
-            axs[2].set_xlabel('Frequency')
-            axs[2].set_ylabel('Amplitude')
-            axs[2].set_title('Raw Voltage PSD')
+            # Raw voltage expansion
+            #line6,=axs[2].plot(np.squeeze(f),np.squeeze(PSD))
+            #axs[2].set_ylim(0,15)
+            #axs[2].set_xlim(0,35)
+            #axs[2].set_xlabel('Frequency')
+            #axs[2].set_ylabel('Amplitude')
+            #axs[2].set_title('Raw Voltage PSD')
 
 
 
