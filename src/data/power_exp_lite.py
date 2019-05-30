@@ -4,6 +4,7 @@ from pylsl import StreamInlet, resolve_byprop  # Module to receive EEG data
 import utils  # Our own utility functions
 import matplotlib.axes as axes
 import time
+import muselsl
 
 # Handy little enum to make code more readable
 class Band:
@@ -19,20 +20,20 @@ class Band:
 
 # Length of the EEG data buffer (in seconds)
 # This buffer will hold last n seconds of data and be used for calculations
-BUFFER_LENGTH = 8
+BUFFER_LENGTH = 5
 
 # Length of the epochs used to compute the FFT (in seconds)
-EPOCH_LENGTH = 5
+EPOCH_LENGTH = 1
 
 # Amount of overlap between two consecutive epochs (in seconds)
-OVERLAP_LENGTH = 4.99
+OVERLAP_LENGTH = 0.8
 
 # Amount to 'shift' the start of each next consecutive epoch
 SHIFT_LENGTH = EPOCH_LENGTH - OVERLAP_LENGTH
 
 # Index of the channel(s) (electrodes) to be used
 # 0 = left ear, 1 = left forehead, 2 = right forehead, 3 = right ear
-INDEX_CHANNEL = [3]
+INDEX_CHANNEL = [0]
 
 if __name__ == "__main__":
 
@@ -77,7 +78,7 @@ if __name__ == "__main__":
     # Initilize Plots
     
     plt.ion() 
-    fig, axs = plt.subplots(1, 3, figsize=(9, 3), sharey=False)
+    fig, axs = plt.subplots(1, 4, figsize=(9, 3), sharey=False)
     
     
     
@@ -112,9 +113,9 @@ if __name__ == "__main__":
                                              EPOCH_LENGTH * fs)
 
             # Compute band powers
-            band_powers = utils.compute_band_powers(data_epoch, fs)
-            band_buffer, _ = utils.update_buffer(band_buffer,
-                                                np.asarray([band_powers]))
+            #band_powers = utils.compute_band_powers(data_epoch, fs)
+            #band_buffer, _ = utils.update_buffer(band_buffer,
+                                                #np.asarray([band_powers]))
             # Compute the average band powers for all epochs in buffer
             # This helps to smooth out noise
             #smooth_band_powers = np.mean(band_buffer, axis=0)
@@ -134,24 +135,50 @@ if __name__ == "__main__":
             ## PSD for uV timeseries
 
             winSampleLength, nbCh = data_epoch.shape
-            #w = np.hamming(winSampleLength)
-            #dataWinCentered = data_epoch - np.mean(data_epoch, axis=0)  # Remove offset
-            #dataWinCenteredHam = (dataWinCentered.T * w).T
+            w = np.hamming(winSampleLength)
+            dataWinCentered = data_epoch - np.mean(data_epoch, axis=0)  # Remove offset
+            dataWinCenteredHam = (dataWinCentered.T * w).T
 
             NFFT = utils.nextpow2(winSampleLength)
-            #Y = np.fft.fft(dataWinCenteredHam, n=NFFT, axis=0) / winSampleLength
-            #PSD = 2 * np.abs(Y[0:int(NFFT / 2), :])
+            Y = np.fft.fft(dataWinCenteredHam, n=NFFT, axis=0) / winSampleLength
+            PSD = 2 * np.abs(Y[0:int(NFFT / 2), :])
             #meanAll=np.mean(PSD,axis=0)
             #power_buffer, _ = utils.update_buffer(power_buffer,
                                                  #np.asarray([meanAll]))
             f = fs / 2 * np.linspace(0, 1, int(NFFT / 2))
-            #print(power_buffer)
+            # SPECTRAL FEATURES
+            # Average of band powers
+            # Delta <4
+            ind_delta, = np.where(f < 4)
+            meanDelta = np.mean(PSD[ind_delta, :], axis=0)
+            # Theta 4-8
+            ind_theta, = np.where((f >= 4) & (f <= 8))
+            meanTheta = np.mean(PSD[ind_theta, :], axis=0)
+            # Alpha 8-12
+            ind_alpha, = np.where((f >= 8) & (f <= 12))
+            meanAlpha = np.mean(PSD[ind_alpha, :], axis=0)
+            # Beta 12-30
+            ind_beta, = np.where((f >= 12) & (f < 30))
+            meanBeta = np.mean(PSD[ind_beta, :], axis=0)
+            # All
+            ind_all, = np.where((f < 30))
+            meanAll = np.mean(PSD[ind_all, :], axis=0)
+
+            band_powers = np.concatenate((meanDelta, meanTheta, meanAlpha,
+                                     meanBeta, meanAll), axis=0)
+
+            #band_powers = np.log10(band_powers)
+
+            band_buffer, _ = utils.update_buffer(band_buffer,
+                                                np.asarray([band_powers]))
 
             ## PSD for power timeseries
-            winSampleLength2, nbCh2=band_buffer.shape
+            data_epoch_pwr = utils.get_last_data(band_buffer,
+                                             EPOCH_LENGTH * fs)
+            winSampleLength2, nbCh2=data_epoch_pwr.shape
             w2=np.hamming(winSampleLength2)
             
-            dataWinCentered2 = band_buffer - np.mean(band_buffer, axis=0)
+            dataWinCentered2 = data_epoch_pwr - np.mean(data_epoch_pwr, axis=0)
             dataWinCenteredHam2 = (dataWinCentered2.T * w2).T
             NFFT2=utils.nextpow2(winSampleLength2)
             Y2 = np.fft.fft(dataWinCenteredHam2, n=NFFT, axis=0) / winSampleLength
@@ -195,18 +222,26 @@ if __name__ == "__main__":
             
 
             # Raw voltage expansion
-            #line6,=axs[2].plot(np.squeeze(f),np.squeeze(PSD))
+            line6,=axs[2].plot(np.squeeze(f),np.squeeze(PSD))
             #axs[2].set_ylim(0,15)
-            #axs[2].set_xlim(0,35)
-            #axs[2].set_xlabel('Frequency')
-            #axs[2].set_ylabel('Amplitude')
-            #axs[2].set_title('Raw Voltage PSD')
+            axs[2].set_xlim(0,55)
+            axs[2].set_xlabel('Frequency')
+            axs[2].set_ylabel('Amplitude')
+            axs[2].set_title('Raw Voltage PSD')
+
+            # Power Time Series
+            line7,=axs[3].plot(band_buffer[:,0])
+            line8,=axs[3].plot(band_buffer[:,1])
+            line9,=axs[3].plot(band_buffer[:,2])
+            line10,=axs[3].plot(band_buffer[:,3])
+            axs[3].legend([r'$\delta$ (0-4 hz)',r'$\theta$ (4-8 hz)',r'$\alpha$ (8-12 hz)',r'$\beta$ (12-30 hz)'])
 
 
 
             fig.canvas.draw()
             fig.canvas.flush_events()
             plt.pause(.00001)
+            axs[3].clear()
             axs[2].clear()
             axs[1].clear()
             axs[0].clear()
