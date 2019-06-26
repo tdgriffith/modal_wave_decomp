@@ -12,7 +12,6 @@ class Band:
     Theta = 1
     Alpha = 2
     Beta = 3
-    All = 4
 
 
 """ EXPERIMENTAL PARAMETERS """
@@ -20,20 +19,18 @@ class Band:
 
 # Length of the EEG data buffer (in seconds)
 # This buffer will hold last n seconds of data and be used for calculations
-BUFFER_LENGTH = 3
+BUFFER_LENGTH = 10
 
 # Length of the epochs used to compute the FFT (in seconds)
-EPOCH_LENGTH = 2
+EPOCH_LENGTH = 1
 
 # Amount of overlap between two consecutive epochs (in seconds)
-OVERLAP_LENGTH = 1.99
+OVERLAP_LENGTH = 0.8
 
 # Amount to 'shift' the start of each next consecutive epoch
 SHIFT_LENGTH = EPOCH_LENGTH - OVERLAP_LENGTH
 
-# Index of the channel(s) (electrodes) to be used
-# 0 = left ear, 1 = left forehead, 2 = right forehead, 3 = right ear
-INDEX_CHANNEL = [0]
+
 
 if __name__ == "__main__":
 
@@ -50,20 +47,33 @@ if __name__ == "__main__":
     inlet = StreamInlet(streams[0], max_chunklen=12)
     eeg_time_correction = inlet.time_correction()
 
-    # Get the stream info and description
+    # Get the stream info, description, sampling frequency, number of channels
     info = inlet.info()
     description = info.desc()
-
-    # Get the sampling frequency
-    # This is an important value that represents how many EEG data points are
-    # collected in a second. This influences our frequency band calculation.
-    # for the Muse 2016, this should always be 256
     fs = int(info.nominal_srate())
+    n_channels = info.channel_count()
+    
+    ch = description.child('channels').first_child()
+    ch_names = [ch.child_value('label')]
+    for i in range(1, n_channels):
+        ch = ch.next_sibling()
+        ch_names.append(ch.child_value('label'))
+
+    # Index of the channel (electrode) to be used
+    # 0 = left ear, 1 = left forehead, 2 = right forehead, 3 = right ear
+    index_channel = [0, 1, 2, 3]
+    # Name of our channel for plotting purposes
+    ch_names = [ch_names[i] for i in index_channel]
+    n_channels = len(index_channel)
+
+    feature_names = utils.get_feature_names(ch_names)
+
+   
 
     """ 2. INITIALIZE BUFFERS """
 
     # Initialize raw EEG data buffer
-    eeg_buffer = np.zeros((int(fs * BUFFER_LENGTH), 1))
+    eeg_buffer = np.zeros((int(fs * BUFFER_LENGTH), n_channels))
     filter_state = None  # for use with the notch filter
 
     # Compute the number of epochs in "buffer_length"
@@ -72,13 +82,13 @@ if __name__ == "__main__":
 
     # Initialize the band power buffer (for plotting)
     # bands will be ordered: [delta, theta, alpha, beta, all]
-    band_buffer = np.zeros((n_win_test, 5))
+    band_buffer = np.zeros((n_win_test, len(feature_names)))
     #power_buffer=np.zeros((n_win_test, 1))
 
     # Initilize Plots
     
     plt.ion() 
-    fig, axs = plt.subplots(1, 4, figsize=(9, 3), sharey=False)
+    fig, axs = plt.subplots(4, 3, figsize=(9, 3), sharey=False)
     
     
     
@@ -100,7 +110,7 @@ if __name__ == "__main__":
                 timeout=1, max_samples=int(SHIFT_LENGTH * fs))
 
             # Only keep the channel we're interested in
-            ch_data = np.array(eeg_data)[:, INDEX_CHANNEL]
+            ch_data = np.array(eeg_data)[:, index_channel]
 
             # Update EEG buffer with the new data
             eeg_buffer, filter_state = utils.update_buffer(
@@ -138,13 +148,12 @@ if __name__ == "__main__":
             w = np.hamming(winSampleLength)
             dataWinCentered = data_epoch - np.mean(data_epoch, axis=0)  # Remove offset
             dataWinCenteredHam = (dataWinCentered.T * w).T
+            dataWinCenteredHam=dataWinCenteredHam**2 #Square for instant power
 
             NFFT = utils.nextpow2(winSampleLength)
             Y = np.fft.fft(dataWinCenteredHam, n=NFFT, axis=0) / winSampleLength
             PSD = 2 * np.abs(Y[0:int(NFFT / 2), :])
-            #meanAll=np.mean(PSD,axis=0)
-            #power_buffer, _ = utils.update_buffer(power_buffer,
-                                                 #np.asarray([meanAll]))
+           
             f = fs / 2 * np.linspace(0, 1, int(NFFT / 2))
             # SPECTRAL FEATURES
             # Average of band powers
@@ -165,27 +174,14 @@ if __name__ == "__main__":
             meanAll = np.mean(PSD[ind_all, :], axis=0)
 
             band_powers = np.concatenate((meanDelta, meanTheta, meanAlpha,
-                                     meanBeta, meanAll), axis=0)
+                                     meanBeta), axis=0)
 
             #band_powers = np.log10(band_powers)
 
             band_buffer, _ = utils.update_buffer(band_buffer,
                                                 np.asarray([band_powers]))
 
-            ## PSD for power timeseries
-            data_epoch_pwr = utils.get_last_data(band_buffer,
-                                             EPOCH_LENGTH * fs)
-            winSampleLength2, nbCh2=data_epoch_pwr.shape
-            w2=np.hamming(winSampleLength2)
-            
-            dataWinCentered2 = data_epoch_pwr - np.mean(data_epoch_pwr, axis=0)
-            dataWinCenteredHam2 = (dataWinCentered2.T * w2).T
-            NFFT2=utils.nextpow2(winSampleLength2)
-            Y2 = np.fft.fft(dataWinCenteredHam2, n=NFFT, axis=0) / winSampleLength
-            PSD2 = 2 * np.abs(Y2[0:int(NFFT2 / 2), :])
-            fs2=1/SHIFT_LENGTH
-            f2 = fs2 / 2 * np.linspace(0, 1, int(NFFT2 / 2))
-                        
+                             
 
 
 
@@ -198,53 +194,63 @@ if __name__ == "__main__":
             #print('Top frequencies:',sorted_freq)
             
             
-            line1,=axs[0].plot(np.squeeze(f2),np.squeeze(PSD2[:,0]),'o')
-            line2,=axs[0].plot(np.squeeze(f2),np.squeeze(PSD2[:,1]),'o')
-            line3,=axs[0].plot(np.squeeze(f2),np.squeeze(PSD2[:,2]),'o')
-            line4,=axs[0].plot(np.squeeze(f2),np.squeeze(PSD2[:,3]),'o')
+            line1,=axs[0,0].plot(np.squeeze(f[ind_delta]),np.squeeze(PSD[ind_delta, 0]),'o')
+            line2,=axs[0,0].plot(np.squeeze(f[ind_theta]),np.squeeze(PSD[ind_theta, 0]),'o')
+            line3,=axs[0,0].plot(np.squeeze(f[ind_alpha]),np.squeeze(PSD[ind_alpha, 0]),'o')
+            line4,=axs[0,0].plot(np.squeeze(f[ind_beta]),np.squeeze(PSD[ind_beta, 0]),'o')
             
-            axs[0].legend([r'$\delta$ (0-4 hz)',r'$\theta$ (4-8 hz)',r'$\alpha$ (8-12 hz)',r'$\beta$ (12-30 hz)'])
-            axs[0].set_title(r'Expansion of Bandwidth Power')
-            axs[0].set_xlabel('Frequency')
-            axs[0].set_ylabel('Amplitude')
+            axs[0,0].legend([r'$\delta$ (0-4 hz)',r'$\theta$ (4-8 hz)',r'$\alpha$ (8-12 hz)',r'$\beta$ (12-30 hz)'])
+            axs[0,0].set_title(r'Expansion of Instant Bandwidth Power')
+            axs[0,0].set_xlabel('Frequency')
+            axs[0,0].set_ylabel('Amplitude')
+
+            line5,=axs[1,0].plot(np.squeeze(f[ind_delta]),np.squeeze(PSD[ind_delta, 1]),'o')
+            line6,=axs[1,0].plot(np.squeeze(f[ind_theta]),np.squeeze(PSD[ind_theta, 1]),'o')
+            line7,=axs[1,0].plot(np.squeeze(f[ind_alpha]),np.squeeze(PSD[ind_alpha, 1]),'o')
+            line8,=axs[1,0].plot(np.squeeze(f[ind_beta]),np.squeeze(PSD[ind_beta, 1]),'o')
+            
+            axs[1,0].legend([r'$\delta$ (0-4 hz)',r'$\theta$ (4-8 hz)',r'$\alpha$ (8-12 hz)',r'$\beta$ (12-30 hz)'])
+            axs[1,0].set_title(r'Expansion of Instant Bandwidth Power')
+            axs[1,0].set_xlabel('Frequency')
+            axs[1,0].set_ylabel('Amplitude')
 
             
             #axs[0].set_ylim(0,.03)
-            axs[0].set_xlim(0,35)
+            #axs[0].set_xlim(0,35)
             
 
             ## One big bandwidth plot
-            line5,=axs[1].plot(np.squeeze(f2),np.squeeze(PSD2[:,4]),'o')
+            #line5,=axs[1].plot(np.squeeze(f),np.squeeze(PSD[:,4]),'o')
             #axs[1].set_ylim(0,.15)
-            axs[1].set_xlabel('Frequency')
-            axs[1].set_ylabel('Amplitude')
-            axs[1].set_title('Power PSD')
+            #axs[1].set_xlabel('Frequency')
+            #axs[1].set_ylabel('Amplitude')
+            #axs[1].set_title('Power PSD')
             
 
             # Raw voltage expansion
-            line6,=axs[2].plot(np.squeeze(f),np.squeeze(PSD))
+            line9,=axs[0,1].plot(np.squeeze(f),np.squeeze(PSD[:, 0]))
             #axs[2].set_ylim(0,15)
-            axs[2].set_xlim(0,55)
-            axs[2].set_xlabel('Frequency')
-            axs[2].set_ylabel('Amplitude')
-            axs[2].set_title('Raw Voltage PSD')
+            axs[0,1].set_xlim(0,55)
+            axs[0,1].set_xlabel('Frequency')
+            axs[0,1].set_ylabel('Amplitude')
+            axs[0,1].set_title('Raw Voltage PSD')
 
             # Power Time Series
-            line7,=axs[3].plot(band_buffer[:,0])
-            line8,=axs[3].plot(band_buffer[:,1])
-            line9,=axs[3].plot(band_buffer[:,2])
-            line10,=axs[3].plot(band_buffer[:,3])
-            axs[3].legend([r'$\delta$ (0-4 hz)',r'$\theta$ (4-8 hz)',r'$\alpha$ (8-12 hz)',r'$\beta$ (12-30 hz)'])
+            line10,=axs[0,2].plot(band_buffer[:,0])
+            line11,=axs[0,2].plot(band_buffer[:,1])
+            line12,=axs[0,2].plot(band_buffer[:,2])
+            line13,=axs[0,2].plot(band_buffer[:,3])
+            axs[0,2].legend([r'$\delta$ (0-4 hz)',r'$\theta$ (4-8 hz)',r'$\alpha$ (8-12 hz)',r'$\beta$ (12-30 hz)'])
 
 
 
             fig.canvas.draw()
             fig.canvas.flush_events()
             plt.pause(.00001)
-            axs[3].clear()
-            axs[2].clear()
-            axs[1].clear()
-            axs[0].clear()
+            axs[0,1].clear()
+            axs[0,2].clear()
+            axs[0,0].clear()
+            axs[1,0].clear()
 
 
             # Beta Protocol:
