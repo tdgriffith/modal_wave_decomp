@@ -204,7 +204,7 @@ def train_classifier(feature_matrix_0, feature_matrix_1, algorithm='SVM'):
     X = (features_all - mu_ft) / std_ft
 
     # Train SVM using default parameters
-    clf = svm.SVC()
+    clf = svm.NuSVC() #clf = svm.SVC()
     clf.fit(X, y)
 
     # Visualize decision boundary
